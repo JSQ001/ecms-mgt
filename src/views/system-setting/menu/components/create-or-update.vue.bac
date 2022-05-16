@@ -1,0 +1,137 @@
+<template>
+  <div class="createOrUpdate" ref="recordForm">
+    <Modal
+        class="createUserModal"
+        :title="title"
+        v-model:visible="_visible"
+        width="60vw"
+        cancelText="取消"
+        :getContainer="$refs.recordForm"
+        okText="保存"
+        @ok="handleOk"
+        @cancel="handleCancel"
+    >
+      <Form :model="props.record" ref="formRef" :rules="rulesRef">
+        <FormItem label="菜单名称" name="menuName">
+          <Input size="large" v-model:value="props.record.menuName" placeholder="请输入"/>
+        </FormItem>
+        <FormItem label="路由" name="path">
+          <Input v-model:value="props.record.path" size="large" placeholder="请输入"/>
+        </FormItem>
+        <FormItem label="父级菜单" name="parentId">
+          <TreeSelect
+              :disabled="disabled"
+              v-model:value="props.record.parentId"
+              show-search
+              size="large"
+              style="width: 100%"
+              :dropdown-style="{ maxHeight: '400px', overflow: 'auto' }"
+              placeholder="请输入"
+              allow-clear
+              tree-default-expand-all
+              :fieldNames="{key: 'id', label: 'menuName', value: 'id'}"
+              :tree-data="parentMenuOptions"
+          />
+        </FormItem>
+
+      </Form>
+    </Modal>
+
+  </div>
+</template>
+
+<script setup lang="ts">
+import {reactive, toRaw, ref, computed, getCurrentInstance} from 'vue'
+import {Modal, TreeSelect, Form, Button, InputNumber, Select, Input} from 'ant-design-vue'
+import { commonSearch } from '@/api/common'
+
+const FormItem = Form.Item
+const { proxy }:any = getCurrentInstance()
+
+
+const emit = defineEmits(['update:visible', 'onSave'])
+
+const props = defineProps({
+  visible: {
+    type: Boolean,
+    required: true
+  },
+  record: {
+    type: Object,
+    required: true
+  }
+})
+
+const parentMenuOptions = ref([])
+try{
+  const params = {_moduleKey: 'menu'}
+  const { data:{code,data},status}: any = await commonSearch(params)
+  if(status === 200 && code === 200){
+    parentMenuOptions.value = data.records
+  }
+}catch (e){
+  console.log(e)
+}
+
+const state = reactive({})
+
+const title = computed(() => props.record.id ? '编辑菜单' : '添加菜单')
+
+//新建子菜单时不可以修改菜单
+const disabled = computed(()=> !props.record.id && !!props.record.parentId)
+
+const _visible = computed({
+  set: (val) => {
+    emit('update:visible', val)
+  },
+  get: () => props.visible
+})
+const rulesRef = reactive({
+  name: [
+    {
+      required: true,
+      message: '请输入菜单名称',
+    },
+  ],
+  path: [
+    {
+      required: true,
+      message: '请输入路由',
+    },
+  ],
+});
+
+function handleClose() {
+  emit('update:visible', false)
+}
+
+async function handleOk() {
+  const values = await proxy.$refs.formRef.validate()
+  if(props.record.id){
+    values.id = props.record.id
+    values.userInfoId = props.record.userInfoId
+  }
+  emit('onSave', values)
+}
+
+function handleCancel() {
+  handleClose()
+}
+</script>
+
+<style lang="scss">
+.createOrUpdate{
+  .createUserModal {
+    .ant-form{
+      padding: .1rem 1rem;
+      .ant-form-item-label{
+        width: .72rem !important;
+      }
+    }
+  }
+}
+
+
+.ant-modal-footer {
+}
+</style>

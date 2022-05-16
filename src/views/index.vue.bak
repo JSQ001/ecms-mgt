@@ -1,0 +1,649 @@
+<template>
+  <div class="publish">
+    <div class="headerArea">
+      <div v-for="(item,index) in state.headerList" :key="index" class="item" :style="{ background: item.bg}">
+        <img :src="item.img" alt="">
+        <span class="content">
+          <i :class="`icon iconfont ${item.icon}`"/>
+          <span class="content-right">
+            <span class="total">{{ allData[item.key] }}</span>
+            <span class="name">{{ item.name }}</span>
+          </span>
+        </span>
+      </div>
+    </div>
+    <div class="centerArea">
+      <div class="center-left">
+        <div @click="$router.push('/info/publish/create-or-update')" class="center-left-module highlight">
+          <i class="icon iconfont icon-wenbenbianji_tianchong"/>
+          <div>编辑新闻</div>
+        </div>
+        <div @click="$router.push('/collection/rule/create-or-update')" class="center-left-module highlight">
+          <i class="icon iconfont icon-riqi"/>
+          <div class="setCollectionRule">设置采集规则</div>
+        </div>
+      </div>
+      <div class="center-right highlight">
+        <div ref="statistics" class="statistics"/>
+      </div>
+    </div>
+    <div class="bottom highlight">
+      <div class="header">
+        <div class="header-left">
+          <span class="title">发稿统计</span>
+          <DatePicker.RangePicker  v-model:value="time"  :placeholder="['开始日期', '结束日期']"/>
+        </div>
+      </div>
+      <div class="wrapperColumnCanvas">
+        <div ref="canvas" class="columnCanvas"/>
+      </div>
+    </div>
+  </div>
+
+</template>
+
+<script lang="ts" setup>
+  import {reactive, ref, onMounted, nextTick, watch} from 'vue'
+  import * as echarts from 'echarts'
+  import { DatePicker } from 'ant-design-vue'
+  import {getStatistics,statisticsByColumn} from '@/api/common'
+  import dayjs from "dayjs";
+  import {getDate} from "@/utils";
+  import {store} from "@/store";
+
+  const elementResizeDetectorMaker = require("element-resize-detector");
+  //监听元素变化
+  const erd = elementResizeDetectorMaker();
+
+  //监听元素变化
+
+  const state = reactive({
+    statisticalMethod: '',
+    headerList: [
+      {
+        icon: 'icon-quanbu',
+        key: 'all',
+        name: '全部稿件',
+        bg: '#C22400',
+        img: require('@/assets/images/红旗1.png')
+      },
+      {
+        icon: 'icon-shenhetongguo-02',
+        total: '20',
+        key: 'notApproved',
+        name: '待审核',
+        bg: '#FFB917',
+        img: require('@/assets/images/红旗1.png')
+      },
+      {
+        icon: 'icon-yifabu',
+        key: 'approved',
+        name: '已发布',
+        bg: '#25ADF3',
+        img: require('@/assets/images/红旗1.png')
+      },
+      {
+        icon: 'icon-a-shenhebutongguo-01',
+        key: 'reject',
+        name: '审核不通过',
+        bg: '#9F9F9F',
+        img: require('@/assets/images/红旗1.png')
+      }
+    ],
+    searchParams: {},
+    visible: false,
+    record: {},
+    moduleKey: 'article',
+    parent: {}
+  })
+  const statistics = ref()
+  const canvas = ref()
+  const staticData = ref();
+
+  const allData = ref({})
+  const currentWeekData = ref({})
+  const columnData = reactive({
+    source: [],
+    series: [{ type: 'bar',barWidth:'5%',color: '#FFB917' },{ type: 'bar',barWidth:'5%',color: '#25ADF3' },{ type: 'bar',barWidth:'5%',color: '#9F9F9F' }]
+  })
+  const listData = ref([])
+  const time = ref();
+
+  onMounted( ()=>{
+    Promise.all([statisticsAll(),statisticsCurrentWeek(),statisticsColumn()])
+  })
+
+  watch(columnData,()=>{
+    drawColumn()
+  })
+  watch(time,()=>{
+    statisticsColumn()
+  })
+
+  watch(listData,val=>{
+    const source = [["product", '待审核', '已发布', '不通过']]
+    columnData.source = source.concat(val);
+  })
+
+  //统计全部
+  async function statisticsAll(){
+    try {
+      const {data:{data,code},status} = await getStatistics();
+      if(code === 200 && status === 200){
+        allData.value = data
+      }
+    }catch (e) {
+      console.log(e)
+    }
+  }
+
+  async function statisticsCurrentWeek(){
+    const endDate = new Date()
+    const startDate = new Date(endDate.getTime() - 7 * 24 * 60 * 60 * 1000)
+    const params = {
+      startTime: getDate(startDate),
+      endTime: getDate(endDate)
+    }
+    // val.startTime = dayjs(new Date()).format("YYYY-MM-DD HH:MM:ss")
+    try {
+      const {data:{data,code},status} = await getStatistics(params);
+      if(code === 200 && status === 200){
+        currentWeekData.value = data
+        drawCurrentWeek()
+      }
+    }catch (e) {
+      console.log(e)
+    }
+  }
+
+
+  async function statisticsColumn(){
+    let params:any = {
+      code: 'major-units'
+    };
+    if(time.value){
+      params.startTime = getDate(time.value[0])
+      params.endTime = getDate(time.value[1]);
+    }
+    try {
+      const {data:{data,code},status} = await statisticsByColumn(params);
+      if(code === 200 && status === 200){
+
+        const list:any = []
+        data.forEach((i:any)=>{
+          const xAxis = []
+          xAxis.push(i.name)
+          xAxis.push(i.notApproved || 0)
+          xAxis.push(i.approved || 0)
+          xAxis.push(i.reject || 0)
+          list.push(xAxis)
+        })
+        listData.value = list
+      }
+    }catch (e) {
+      console.log(e)
+    }
+  }
+
+  function drawColumn () {
+    const myChart = echarts.init(canvas.value)
+    // 绘制图表
+    myChart.setOption({
+      title: { text: '' },
+      legend: {
+        right: '0'
+      },
+      grid: {
+        top: 40,// 距上边距
+        left: 0,
+        right: 0,
+        bottom: 45
+      },
+      tooltip: {},
+      dataset: {
+        source: columnData.source
+      },
+      xAxis: [
+        {
+          type: 'category',
+          axisTick: { show: false },
+        }
+      ],
+
+      yAxis: {
+        show:false
+      },
+      series: columnData.series
+    })
+
+    window.onresize = function () {
+      myChart.resize()
+    }
+    erd.listenTo(canvas.value,(element:any)=> nextTick(()=> myChart.resize()))
+  }
+
+  /*
+  * 绘制当前周统计
+  * */
+  function drawCurrentWeek () {
+    const myChart = echarts.init(statistics.value)
+    // 绘制图表
+    myChart.setOption({
+      tooltip: {
+        trigger: 'item'
+      },
+      title: [
+        {
+          text: '当前周统计',
+          textStyle:{
+            color: 'rgb(73,73,73)',
+            fontWeight: 'bold',
+            fontSize: '.2rem'
+          },
+        },
+        {
+          text: '待审核',
+          subtext: `已审核${ Number(currentWeekData.value.approved) + Number(currentWeekData.value.reject)} / 待审核${currentWeekData.value.notApproved}`,
+          left: '16.2%',
+          top: '73%',
+          textAlign: 'center',
+          textStyle:{
+            color: 'rgb(73,73,73)',
+            fontWeight: 'normal',
+            fontSize: '.16rem'
+          },
+          subtextStyle: {
+            color: 'rgb(167,167,167)',
+            fontSize: '.14rem'
+          }
+        },
+        {
+          text: '已发布',
+          subtext: `全部稿件${currentWeekData.value.all} / 已发布${currentWeekData.value.approved}`,
+          left: '49.65%',
+          top: '73%',
+          textAlign: 'center',
+          textStyle:{
+            color: 'rgb(73,73,73)',
+            fontWeight: 'normal',
+            fontSize: '.16rem'
+          },
+          subtextStyle: {
+            color: 'rgb(167,167,167)',
+            fontSize: '.14rem'
+          }
+        },
+        {
+          text: '审核不通过',
+          subtext: `全部稿件${currentWeekData.value.all} / 待审核${currentWeekData.value.notApproved}`,
+          left: '83%',
+          top: '73%',
+          textAlign: 'center',
+          textStyle:{
+            color: 'rgb(73,73,73)',
+            fontWeight: 'normal',
+            fontSize: '.16rem'
+          },
+          subtextStyle: {
+            color: 'rgb(167,167,167)',
+            fontSize: '.14rem'
+          }
+        },
+      ],
+      series: [
+        {
+         // name: '全部审核',
+          type: 'pie',
+          radius: ['35%', '48%'],
+          center: ['50%', '46%'],
+          avoidLabelOverlap: false,
+          color:['rgb(245,186,69)','rgb(239,239,239)'],
+          selectedOffset:0,     //选中块的偏移量
+          left: 0,
+          right: '66.6667%',
+          top: 0,
+          bottom: 0,
+          label: {
+            show: false,
+            position: 'center',
+            formatter: '{d}%',
+            margin: 10
+          },
+          emphasis: {
+            scale:false,
+            label: {
+              show: false,
+              fontSize: '20',
+              fontWeight: 'bold'
+            },
+          },
+          labelLine: {
+            show: false
+          },
+          data: [
+            {
+              value: currentWeekData.value.notApproved,
+              name: '待审核',
+              label:{
+                show:true,     //默认显示第一块
+                fontSize: '.16rem',
+                fontWeight: 'bold'
+              }
+              // tooltip: {
+              //   show: false
+              // },
+            },
+            {
+              value: Number(currentWeekData.value.approved) + Number(currentWeekData.value.reject),
+              name: '已审核',
+              selected:true,     //默认选中第一块
+              label:{
+                show:true,     //默认显示第一块
+                fontSize: '.16rem',
+                fontWeight: 'bold'
+              }
+            },
+          ]
+        },
+        {
+          type: 'pie',
+          radius: ['35%', '48%'],
+          center: ['50%', '46%'],
+          avoidLabelOverlap: false,
+          color:['rgb(82,172,237)','rgb(239,239,239)'],
+          data: [
+            {
+              name: '已发布',
+              //暂时用审核通过的数据代替
+              value: currentWeekData.value.approved,
+              label:{
+                show:true,     //默认显示第一块
+                fontSize: '.16rem',
+                fontWeight: 'bold'
+              }
+            },
+            {
+              name: 'none',
+              value: currentWeekData.value.all,
+              tooltip: {
+                show: false
+              },
+            },
+          ],
+          label: {
+            show: false,
+            position: 'center',
+            formatter: '{d}%'
+          },
+          emphasis: {
+            scale:false,
+            label: {
+              show: false,
+              fontSize: '20',
+              fontWeight: 'bold'
+            },
+          },
+          // labelLine: {
+          //   show: false
+          // },
+          left: '33.3333%',
+          right: '33.3333%',
+          top: 0,
+          bottom: 0
+        },
+        {
+          type: 'pie',
+          radius: ['35%', '48%'],
+          center: ['50%', '46%'],
+          avoidLabelOverlap: false,
+          color:['rgb(142,142,142)','rgb(239,239,239)'],
+          data: [
+            {
+              name: '审核不通过',
+              value: currentWeekData.value.all,
+              label:{
+                show:true,     //默认显示第一块
+                fontSize: '.16rem',
+                fontWeight: 'bold'
+              }
+            },
+            {
+              name: 'none',
+              value: currentWeekData.value.notApproved,
+              tooltip: {
+                show: false
+              },
+            },
+          ],
+          label: {
+            show: false,
+            position: 'center',
+            formatter: '{d}%'
+          },
+          emphasis: {
+            scale:false,
+            label: {
+              show: false,
+              fontSize: '20',
+              fontWeight: 'bold'
+            },
+          },
+          left: '66.667%',
+          top: 0,
+          bottom: 0
+        },
+      ]
+    })
+
+    // 去掉圆环默认hover时高亮效果
+    myChart.on('mouseover', e => {
+      let op = myChart.getOption()
+      if(e.name ==='none'||e.name==='已审核'){
+        myChart.dispatchAction({
+          type: 'downplay',
+          seriesIndex: e.seriesIndex,
+          dataIndex: e.dataIndex,
+          color: e.color
+        })
+        myChart.setOption(op, true)
+      }
+    })
+
+    erd.listenTo(statistics.value,(element:any)=> nextTick(()=> myChart.resize()))
+
+    nextTick(() => {
+      myChart.resize()
+    })
+    window.onresize = function () {
+      myChart.resize()
+    }
+  }
+
+</script>
+<style scoped lang="scss">
+.publish {
+  .headerArea {
+    display: flex;
+    justify-content: space-between;
+
+    .item {
+      position: relative;
+      width: 3.36rem;
+      height: .99rem;
+      box-shadow: 0 3px 6px rgba(255, 185, 23, 0.2);
+      opacity: 1;
+      color: white;
+
+      img {
+        position: absolute;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .content {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        padding: 0 .45rem;
+
+        i {
+          font-size: .6rem;
+        }
+
+        .icon-quanbu{
+          font-size: .8rem;
+        }
+
+        .content-right {
+          display: flex;
+          flex-direction: column;
+          margin-left: .2rem;
+          .total{
+            font-weight: 700;
+            font-size: .2rem;
+          }
+          .name{
+            font-size: .16rem;
+          }
+        }
+
+      }
+    }
+  }
+
+  .highlight{
+    &:hover {
+      box-shadow: 0 .02rem .12rem #0000004d!important
+    }
+  }
+
+  .centerArea {
+    display: flex;
+    margin: .2rem 0;
+
+    .center-left {
+      width: 3.36rem;
+
+      .center-left-module {
+        width: 100%;
+        height: 1.0rem;
+        background: #FFFFFF;
+        opacity: 1;
+        text-align: center;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        //align-items: center;
+        //justify-content: center;
+
+        &:nth-child(1){
+          padding: .12rem;
+        }
+        .setCollectionRule{
+          margin-top: -.2rem;
+        }
+
+        span {
+          color: #595959;
+        }
+        div{
+          font-size: .16rem;
+          color: rgb(95,95,95);
+        }
+
+        i {
+          font-size: .3rem;
+        }
+
+        &:nth-child(1) {
+          i {
+            color: #25ADF3;
+          }
+        }
+
+        &:nth-child(2) {
+          margin-top: .2rem;
+          i {
+            font-size: .5rem;
+            color: #C22400;
+          }
+        }
+
+
+      }
+    }
+
+    .center-right {
+      background: white;
+      width: calc(100% - 3.56rem);
+      margin-left: 20px;
+      padding: .1rem;
+      font-size: .16rem;
+    }
+  }
+
+  .bottom {
+    background: white;
+    width: 100%;
+
+    .header {
+      padding: .2rem;
+      position: absolute;
+      z-index: 100;
+
+      :deep(.el-select) {
+        margin-left: .4rem;
+
+        .el-input__inner {
+          border-radius: 0;
+        }
+      }
+      .header-left{
+        display: flex;
+        align-items: center;
+        font-size: .26rem;
+        .title{
+          margin-right: .2rem;
+        }
+      }
+    }
+
+    .wrapperColumnCanvas {
+      width: 100%;
+      padding: .18rem .2rem 0;
+      position: relative;
+      min-height: 2.6rem;
+      height: 3.4rem;
+      overflow: hidden;
+      .columnCanvas{
+        width: 100%;
+        height: 100%;
+      }
+    }
+  }
+
+  :deep(.el-table) tbody tr:hover > td {
+    background-color: red !important
+  }
+
+  .editor-btn {
+    color: #FFB917;
+  }
+
+  .del-btn {
+    color: #C22400;
+  }
+
+  canvas {
+    width: 100% !important;
+  }
+}
+
+.statistics {
+  width: 100%;
+  height: 100%;
+  overflow: hidden !important;
+}
+</style>
